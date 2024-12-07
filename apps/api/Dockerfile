@@ -1,4 +1,4 @@
-FROM node:20-slim AS base
+FROM node:20-bullseye-slim AS base
 ENV PNPM_HOME="/pnpm"
 ENV PATH="$PNPM_HOME:$PATH"
 LABEL fly_launch_runtime="Node.js"
@@ -28,12 +28,27 @@ RUN cd /app/src/lib/go-html-to-md && \
 
 FROM base
 RUN apt-get update -qq && \
-    apt-get install --no-install-recommends -y chromium chromium-sandbox && \
-    rm -rf /var/lib/apt/lists /var/cache/apt/archives
+    apt-get install -y wget gnupg && \
+    wget -q -O - https://dl-ssl.google.com/linux/linux_signing_key.pub | apt-key add - && \
+    sh -c 'echo "deb [arch=amd64] http://dl.google.com/linux/chrome/deb/ stable main" >> /etc/apt/sources.list.d/google.list' && \
+    apt-get update && \
+    apt-get install -y google-chrome-stable fonts-ipafont-gothic fonts-wqy-zenhei fonts-thai-tlwg fonts-kacst fonts-freefont-ttf libxss1 \
+    --no-install-recommends && \
+    rm -rf /var/lib/apt/lists/* /var/cache/apt/archives
+
 COPY --from=prod-deps /app/node_modules /app/node_modules
 COPY --from=build /app /app
 COPY --from=go-base /app/src/lib/go-html-to-md/html-to-markdown.so /app/dist/src/lib/go-html-to-md/html-to-markdown.so
 
-# Start the server by default, this can be overwritten at runtime
-EXPOSE 8080
-ENV PUPPETEER_EXECUTABLE_PATH="/usr/bin/chromium"
+# Add Chrome as a user
+RUN groupadd -r pptruser && useradd -r -g pptruser -G audio,video pptruser \
+    && mkdir -p /home/pptruser/Downloads \
+    && chown -R pptruser:pptruser /home/pptruser \
+    && chown -R pptruser:pptruser /app
+
+# Run everything after as non-privileged user.
+USER pptruser
+
+EXPOSE 3002
+
+CMD ["pnpm", "start:production"]
